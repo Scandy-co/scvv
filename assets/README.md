@@ -2,7 +2,7 @@
 
 This directory is in the gitignore so you don't accidentally populate more big asset files without meaning to.
 
-Having to use `git add -f asset/myNewAsset` is a good thing!
+Having to use `git add -f assets/myNewAsset` is a good thing!
 
 
 ## hoxelCardHelloWorld
