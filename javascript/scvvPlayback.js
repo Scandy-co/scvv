@@ -8,13 +8,12 @@
  *
  \*************************************************************************** */
 
-//
+const THREE = require('three')
 
-import * as THREE from 'three'
-import { downloadAudioBuffer } from '../utils'
+const { downloadAudioBuffer } = require('./utils')
 
 // Array to keep buffered frames in
-const bufferedFrames = []
+let bufferedFrames = []
 
 // Audio context and source global vars
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
@@ -23,6 +22,7 @@ if (!audioCtx) {
 }
 let audioSource = null
 let audioBuffer = null
+let audioSwitch = false
 
 // Minimum delay between frames. This is will change based on your client
 const min_delay_ms = 20
@@ -39,6 +39,10 @@ let lastRenderMS = Date.now()
 // THREEJS objects to playback the SCVV frames
 const scvvTextureImage = new Image()
 const scvvTexture = new THREE.Texture(scvvTextureImage)
+// Bind the onload of the image to always update the texture
+scvvTextureImage.onload = () => {
+  scvvTexture.needsUpdate = true
+}
 const scvvMaterial = new THREE.MeshBasicMaterial({
   color: 0xffffff,
   opacity: 0.92,
@@ -61,11 +65,6 @@ let needsAdding = true
  * @param {*} container the div container to put the THREEJS renderer in
  */
 const initTHREEScene = (width, height, container) => {
-  // Bind the onload of the image to always update the texture
-  scvvTextureImage.onload = () => {
-    scvvTexture.needsUpdate = true
-  }
-
   // sets up the renderer for the browser
   renderer = new THREE.WebGLRenderer({
     precision: 'lowp',
@@ -102,7 +101,7 @@ const getAudioBuffer = hoxelJSON =>
     if (audioBuffer) {
       resolve(audioBuffer)
     } else {
-      let src = `${HOXEL_URL}/${hoxelJSON.audio}`
+      let src = `${hoxelJSON.HOXEL_URL}/${hoxelJSON.audio}`
       downloadAudioBuffer(audioCtx, src)
         .then(buffer => {
           audioBuffer = buffer
@@ -123,9 +122,6 @@ const playbackAudio = scvvJSON => {
     audioSource.buffer = buffer
     audioSource.loop = false
     audioSource.connect(audioCtx.destination)
-    if (lastPlayedIdx == -1) {
-      return
-    }
     const start_sec = vv_frame_ms * 1e-3
     const offset_msec = scvvJSON.audio_us_offset * 1e-3
     if (offset_msec > 0) {
@@ -159,9 +155,11 @@ const displaySCVVFrame = frame => {
     // since
     scvvMesh.material.map = scvvTexture
     // This works for a hoxel recorded at medium size
-    hoxelMesh.position.set(0.7, 0.5, 0.0)
+    scvvMesh.position.set(0, 1.7, -2.0)
+    scvvMesh.scale.set(-1, -1.5, -1.0)
+    scvvMesh.rotation.z = Math.PI / 2
     // only add it once
-    scene.add(hoxelMesh)
+    // scene.add(scvvMesh)
   }
 }
 
@@ -172,6 +170,8 @@ const displaySCVVFrame = frame => {
 const playbackFrames = frameIdx => {
   // Some default reasonable in delay_ms
   let delay_ms = 33
+
+  let nextIdx = frameIdx + 1
 
   // Check to make sure the requested frameIdx is in the buffer
   if (frameIdx < bufferedFrames.length - 1) {
@@ -187,7 +187,7 @@ const playbackFrames = frameIdx => {
       if (audioCtx && audioSource) {
         if (audioSwitch.checked) {
           try {
-            playbackAudio(scvvJSON)
+            // playbackAudio(scvvJSON)
           } catch (e) {
             console.log('error playing audio:', e)
           }
@@ -215,6 +215,7 @@ const playbackFrames = frameIdx => {
   // NOTE: this is a bad sign and means you cannot maintain playback
   if (load_ms > delay_ms) {
     delay_ms = min_delay_ms
+    // console.log('loosing playback')
   } else {
     // Remove the load time from the delay
     delay_ms -= load_ms
@@ -235,3 +236,12 @@ const playbackFrames = frameIdx => {
     playbackFrames(nextIdx)
   }, delay_ms)
 }
+
+module.exports.playbackFrames = playbackFrames
+module.exports.setBufferedFrames = newBuffer => {
+  bufferedFrames = newBuffer
+}
+module.exports.setThreeScene = _scene => {
+  scene = _scene
+}
+module.exports.scvvMesh = scvvMesh
