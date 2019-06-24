@@ -1,0 +1,13 @@
+{
+  "name": "SCVV",
+  "version": "1.0.0",
+  "description": "Scandy Core Volumetric Video",
+  "main": "index.js",
+  "repository": "github.com/scandy-co/scvv",
+  "author": "cole@scandy.co",
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "three": "^0.105.2"
+  }
+}
