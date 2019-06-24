@@ -6,8 +6,8 @@ The eaiset way to checkout SCVV files in action are with:
 
 ![hoxel logo](./assets/images/hoxel-logo-small.jpg)
 
-* [hoxel live stream](live.hoxel.app)
-* [hoxel iOS Beta](hoxel.app)
+* [hoxel live stream](https://live.hoxel.app)
+* [hoxel iOS Beta](https://hoxel.app)
 
 If everything is going right on the web you should see something like this:
 
