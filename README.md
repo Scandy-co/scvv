@@ -4,7 +4,7 @@ This repo provides documentation, demos, and sample files for working with SCVV 
 
 ## hoxel
 
-![hoxel logo](./assets/images/hoxel-logo.jpg)
+![hoxel logo](./assets/images/hoxel-logo-small.jpg)
 
 [hoxel](https://hoxel.app) is the eaiset way to checkout SCVV files in action.
 
