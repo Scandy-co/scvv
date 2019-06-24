@@ -4,10 +4,13 @@
   "description": "Scandy Core Volumetric Video",
   "main": "index.js",
   "repository": "github.com/scandy-co/scvv",
-  "author": "cole@scandy.co",
+  "author": "H. Cole Wiley <cole@scandy.co>",
   "license": "MIT",
   "private": false,
   "dependencies": {
     "three": "^0.105.2"
+  },
+  "devDependencies": {
+    "eslint": "^6.0.0"
   }
 }
