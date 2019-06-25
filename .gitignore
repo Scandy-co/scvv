@@ -2,6 +2,9 @@
 assets/
 build/
 
+# Ignore demo public files
+javascript/demo/aframe/public/
+
 # Ignore dot files
 .**
 
