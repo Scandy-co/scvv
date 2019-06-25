@@ -14,7 +14,7 @@
  * @param {*} responseType ['arraybuffer', 'blob', 'json', 'text']
  * @param {*} timeout How many milliseconds wait until timeout on request
  */
-const downloadBin = (url, responseType, timeout = 10000) =>
+const downloadBin = (url, responseType='arraybuffer', timeout = 10000) =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     /* NOTE: you want to do this, but you can't.. its forbidden

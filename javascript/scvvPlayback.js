@@ -8,7 +8,10 @@
  *
  \*************************************************************************** */
 
-const THREE = require('three')
+
+/* You should bring your own THREEJS with you.
+  Or you can uncomment this line to require it here */
+// const THREE = require('three')
 
 const { downloadAudioBuffer } = require('./utils')
 
