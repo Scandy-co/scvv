@@ -1,11 +1,5 @@
 /* eslint-disable no-undef */
 /* eslint-disable no-redeclare */
-/* eslint-disable no-return-assign */
-/* eslint-disable no-plusplus */
-/* eslint-disable vars-on-top */
-/* eslint-disable no-var */
-/* eslint-disable block-scoped-var */
-/* eslint-disable no-param-reassign */
 const AFRAME = require('AFRAME')
 const _ = require('lodash');
 
@@ -40,7 +34,7 @@ const addFrameBuffer = (frame) => {
       ),
     );
   }
-  // And the indicies
+  // And the indices
   geometry.setIndex(
     new THREE.BufferAttribute(frame.mesh_geometry.index.array, 1),
   );
