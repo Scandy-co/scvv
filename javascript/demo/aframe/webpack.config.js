@@ -59,7 +59,7 @@ module.exports = {
   },
   plugins: [
     // Hot swap please!
-    // new webpack.HotModuleReplacementPlugin(),
+    new webpack.HotModuleReplacementPlugin(),
 
     // Serves the html
     new HtmlWebPackPlugin({

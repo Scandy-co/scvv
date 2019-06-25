@@ -8,7 +8,6 @@ const LoadSCVVWorker = require('worker-loader!../../LoadSCVVWorker.min');
 const { playbackFrames, setBufferedFrames, setThreeScene, scvvMesh } = require('../../scvvPlayback');
 const {downloadBin} = require('../../utils');
 
-
 const ddFrameWorkers = [];
 let newFrames = [];
 let bufferedFrames = [];
@@ -36,6 +35,15 @@ scandyToThreeMat.set(
   0.0,
   1
 )
+
+let playbackStarted = false
+const startPlayback = () => {
+  if( !playbackStarted ){
+    playbackStarted = true
+    console.log('playbackFrames(0)')
+    playbackFrames(0)
+  }
+}
 
 /**
  * Adds the provided frame to the bufferedFrame array
@@ -75,6 +83,10 @@ const addFrameBuffer = (frame) => {
   }
   bufferedFrames = _.sortBy(newBuffered, ['mesh_path']).slice(start);
   setBufferedFrames(bufferedFrames)
+
+  if( bufferedFrames.length > newFrames.length * 0.2 ){
+    startPlayback()
+  }
 };
 
 /**
@@ -120,12 +132,12 @@ const callHoxelWorkers = (scvvJSON) => {
 
   _.forEach(scvvJSON.frames, f => (seenFrames[f.mesh_path] = true));
   // console.log(`new frames to buffer: ${newFrames.length}`)
+  // console.log(`seenFrames: ${seenFrames.length}`)
 
   // Use multiple download workers so we can download faster
   for (var w = 0; w < ddFrameWorkers.length; w++) {
     const worker = ddFrameWorkers[w];
     const offset = w;
-    // TODO: @hcwiley change param from hoxelJSON to scvvJSON
     worker.postMessage({ scvvJSON, offset, numWorkers });
   }
 };
@@ -146,8 +158,6 @@ AFRAME.registerComponent('scvv', {
         ...json,
       };
       callHoxelWorkers(scvvJSON);
-
-      playbackFrames(0)
     });
   },
 });
