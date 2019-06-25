@@ -4,7 +4,7 @@ const AFRAME = require('AFRAME')
 const _ = require('lodash');
 
 // eslint-disable-next-line import/no-unresolved, import/no-webpack-loader-syntax
-const LoadHoxelWorker = require('worker-loader!../../loadHoxelWorker.min');
+const LoadSCVVWorker = require('worker-loader!../../LoadSCVVWorker.min');
 const { playbackFrames, setBufferedFrames, setThreeScene, scvvMesh } = require('../../scvvPlayback');
 const {downloadBin} = require('../../utils');
 
@@ -17,27 +17,51 @@ const seenFrames = [];
 const numWorkers = 1;
 const maxBufferedCount = 500;
 
+const scandyToThreeMat = new THREE.Matrix4()
+scandyToThreeMat.set(
+  -0.0,
+  -1.0,
+  0.0,
+  0.0,
+  -1.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  -1.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  1
+)
+
 /**
  * Adds the provided frame to the bufferedFrame array
  * @param {*} frame
  */
 const addFrameBuffer = (frame) => {
   // console.log("addFrameBuffer", frame.mesh_path)
-  const geometry = new THREE.BufferGeometry();
+  let geometry = new THREE.BufferGeometry()
   // copy over all the attributes
-  for (var prop in frame.mesh_geometry.attributes) {
+  for (var prop in frame.mesh_geometry) {
+    if (prop == 'indices') {
+      continue
+    }
+
     geometry.addAttribute(
       prop,
       new THREE.Float32BufferAttribute(
-        frame.mesh_geometry.attributes[prop].array,
-        frame.mesh_geometry.attributes[prop].itemSize,
-      ),
-    );
+        frame.mesh_geometry[prop].array,
+        frame.mesh_geometry[prop].numComponents
+      )
+    )
   }
   // And the indices
-  geometry.setIndex(
-    new THREE.BufferAttribute(frame.mesh_geometry.index.array, 1),
-  );
+  geometry.setIndex(new THREE.BufferAttribute(frame.mesh_geometry.indices, 1))
+  // Fix the orientation for THREE from ScandyCore
+  geometry.applyMatrix(scandyToThreeMat)
   // Fix the orientation for THREE from ScandyCore
   frame.mesh_geometry = geometry;
   // Merge all the mesh frames together keeping them in order
@@ -74,8 +98,7 @@ const callHoxelWorkers = (scvvJSON) => {
 
   if (ddFrameWorkers.length < numWorkers) {
     for (var w = 0; w < numWorkers; w++) {
-      // TODO: @hcwiley rename from LoadHoxelWorker to LoadSCVVWorker
-      const worker = new LoadHoxelWorker();
+      const worker = new LoadSCVVWorker();
       worker.onmessage = gotMessage;
       ddFrameWorkers.push(worker);
     }
@@ -103,7 +126,7 @@ const callHoxelWorkers = (scvvJSON) => {
     const worker = ddFrameWorkers[w];
     const offset = w;
     // TODO: @hcwiley change param from hoxelJSON to scvvJSON
-    worker.postMessage({ hoxelJSON: scvvJSON, offset, numWorkers });
+    worker.postMessage({ scvvJSON, offset, numWorkers });
   }
 };
 

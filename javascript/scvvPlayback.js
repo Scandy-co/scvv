@@ -159,8 +159,6 @@ const displaySCVVFrame = frame => {
     scvvMesh.material.map = scvvTexture
     // This works for a hoxel recorded at medium size
     scvvMesh.position.set(0, 1.7, -2.0)
-    scvvMesh.scale.set(-1, -1.5, -1.0)
-    scvvMesh.rotation.z = Math.PI / 2
     // only add it once
     // scene.add(scvvMesh)
   }
