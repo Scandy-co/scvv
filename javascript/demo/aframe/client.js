@@ -105,7 +105,7 @@ const callHoxelWorkers = (scvvJSON) => {
   // console.log(`new frames to buffer: ${newFrames.length}`)
 
   // Use multiple download workers so we can download faster
-  for (var w = 0; w < numWorkers; w++) {
+  for (var w = 0; w < ddFrameWorkers.length; w++) {
     const worker = ddFrameWorkers[w];
     const offset = w;
     // TODO: @hcwiley change param from hoxelJSON to scvvJSON
@@ -116,14 +116,14 @@ const callHoxelWorkers = (scvvJSON) => {
 
 AFRAME.registerComponent('scvv', {
   init() {
+    console.log('init scvv')
     const scene = document.querySelector('a-entity').sceneEl.object3D;
     setThreeScene(scene)
 
     const group = document.querySelector('a-entity').object3D;
     group.add(scvvMesh)
     
-    downloadBin('/hoxelCardHelloWorld/scvv_animation.json').then((jsonStr) => {
-      const json = JSON.parse(jsonStr);
+    downloadBin('/hoxelCardHelloWorld/scvv_animation.json', 'json').then((json) => {
       const scvvJSON = {
         HOXEL_URL: 'http://0.0.0.0:3000//hoxelCardHelloWorld',
         ...json,

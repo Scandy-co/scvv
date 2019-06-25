@@ -27,7 +27,7 @@ module.exports = {
   },
   watch: true,
   watchOptions: {
-    ignored: ['node_modules', 'dist'],
+    ignored: ['node_modules', 'dist', 'public'],
   },
   node: {
     fs: 'empty' // fixes bug with Draco making reference to fs from node
@@ -59,7 +59,7 @@ module.exports = {
   },
   plugins: [
     // Hot swap please!
-    new webpack.HotModuleReplacementPlugin(),
+    // new webpack.HotModuleReplacementPlugin(),
 
     // Serves the html
     new HtmlWebPackPlugin({
