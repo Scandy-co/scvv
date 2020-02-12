@@ -2,13 +2,16 @@
   "name": "scvv",
   "version": "0.1.2",
   "description": "Scandy Core Volumetric Video",
-  "main": "scvv.js",
+  "main": "index.js",
   "repository": "github.com/scandy-co/scvv",
   "author": "H. Cole Wiley <cole@scandy.co>",
   "license": "MIT",
   "private": false,
   "scripts": {
     "workers": "NODE_ENV=production webpack --config webpack.worker.js"
+  },
+  "eslintConfig": {
+    "extends": "scandy"
   },
   "dependencies": {
     "aframe": "1.0.3",
@@ -17,7 +20,9 @@
   },
   "devDependencies": {
     "babel-minify-webpack-plugin": "^0.3.1",
-    "eslint": "^6.0.0",
+    "eslint": "^6.8.0",
+    "eslint-config-scandy": "^1.0.1",
+    "prettier": "^1.19.1",
     "shared-worker-loader": "^0.2.0",
     "url-loader": "^3.0.0",
     "webpack-cli": "^3.3.11",
