@@ -13,7 +13,7 @@ const PLUGINS = [
   new webpack.optimize.AggressiveMergingPlugin(),
   new CompressionPlugin(),
   new webpack.EnvironmentPlugin({
-    PACKAGE_VERSION: `${pkg.version}`
+    PACKAGE_VERSION: `${pkg.version}`,
     HOXEL_JS_CDN_URL: `https://hoxel-js-cdn.s3.us-east-2.amazonaws.com/releases`
   })
 ]
