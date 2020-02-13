@@ -4,12 +4,35 @@ const _ = require("lodash")
 const { downloadBin, downloadAudioBuffer } = require("./utils")
 
 let LoadSCVVWorker = null
-// TODO: allow setting via some build flag
+
 const production = process.env.NODE_ENV == "production"
 if (production) {
   // TODO: make this part of webpack!
 } else {
   LoadSCVVWorker = require("worker-loader!./lib/workers/LoadSCVVWorker")
+}
+
+/**
+ * Gets a Web Worker with LoadSCVVWorker ready to run.
+ * Abstracts the production vs development concerns
+ */
+const createLoadSCVVWorker = () => {
+  if (production) {
+    if (LoadSCVVWorker) {
+      return new Worker(LoadSCVVWorker)
+    } else {
+      // TODO: make this part of webpack!
+      return downloadBin(
+        "https://s3.amazonaws.com/hoxel-streamed-001/LoadSCVVWorker.js",
+        "blob"
+      ).then(blob => {
+        LoadSCVVWorker = window.URL.createObjectURL(blob)
+        return new Worker(LoadSCVVWorker)
+      })
+    }
+  } else {
+    return new LoadSCVVWorker()
+  }
 }
 
 let isMobile = false
@@ -40,7 +63,7 @@ AFRAME.registerComponent("scvv", {
     },
     refDistance: { default: 1 },
     rolloffFactor: { default: 5 },
-    volume: { default: 0 },
+    volume: { default: 1 },
     src: {
       type: "string"
     }
@@ -67,7 +90,6 @@ AFRAME.registerComponent("scvv", {
 
     // Trying to fix audio on iOS being a jerk
     const fixAudioContext = () => {
-      console.log("fixAudioContext!")
       this.setAudioContext()
       if (this.audioCtx.state == "suspended") {
         this.audioCtx.resume()
@@ -87,18 +109,6 @@ AFRAME.registerComponent("scvv", {
     } else {
       this.setAudioContext()
       this.setupAudio()
-    }
-
-    // TODO: make this part of webpack!
-    if (production) {
-      downloadBin(
-        "https://s3.amazonaws.com/hoxel-streamed-001/LoadSCVVWorker.js",
-        "blob"
-      ).then(blob => {
-        LoadSCVVWorker = window.URL.createObjectURL(blob)
-        console.log(`set LoadSCVVWorker`)
-        this.downloadSCVVJSON()
-      })
     }
   },
 
@@ -210,12 +220,8 @@ AFRAME.registerComponent("scvv", {
             this.streamAudio()
           } else if (this.scvvJSON.audio) {
             this.getAudioBuffer()
-              .then(() => {
-                // pass
-              })
-              .catch(err => {
-                // pass
-              })
+              .then(() => {})
+              .catch(err => {})
           }
         }
         this.callHoxelWorkers()
@@ -251,7 +257,7 @@ AFRAME.registerComponent("scvv", {
   },
 
   setupBuffers() {
-    console.log("setupBuffers()")
+    // console.log("setupBuffers()")
     this.ddFrameWorkers = []
     this.newFrames = []
     this.bufferedFrames = []
@@ -334,43 +340,7 @@ AFRAME.registerComponent("scvv", {
    * Calls the hoxel workers with the passed in JSON.
    * @param {*} scvvJSON
    */
-  callHoxelWorkers() {
-    const gotMessage = msg => {
-      const { error, dict } = msg.data
-      // console.log("gotMessage", error)
-      if (error) {
-        console.log("error with ddFrameWorker", error)
-        if (dict && dict.frame) {
-          this.badFrames[dict.frame.mesh_path] = dict.frame
-        }
-        // this.callHoxelWorkers()
-      } else if (dict && dict.frame) {
-        // Copy over the data from the Object to a proper BufferGeometry
-        // NOTE: this is a really annoying side of the Worker, it loses the BufferGeometry object
-        this.addFrameBuffer(dict.frame)
-      }
-    }
-
-    if (this.ddFrameWorkers.length < this.numWorkers) {
-      for (var w = 0; w < this.numWorkers; w++) {
-        // FIXME: when built for production
-        let worker = null
-        if (production) {
-          if (LoadSCVVWorker) {
-            worker = new Worker(LoadSCVVWorker)
-          } else {
-            return
-          }
-        } else {
-          worker = new LoadSCVVWorker()
-        }
-        if (worker) {
-          worker.onmessage = gotMessage
-          this.ddFrameWorkers.push(worker)
-        }
-      }
-    }
-
+  async callHoxelWorkers() {
     this.newFrames = []
     _.forEach(this.scvvJSON.frames, frame => {
       // Check to see if we've already got this frame
@@ -387,18 +357,30 @@ AFRAME.registerComponent("scvv", {
     _.forEach(this.newFrames, f => (this.seenFrames[f.mesh_path] = true))
     // console.log(`seenFrames: ${Object.keys(this.seenFrames).length}`)
 
-    if (this.newFrames.length > 0) {
-      // console.log(`new frames to buffer: ${this.newFrames.length}`)
-      // Use multiple download workers so we can download faster
-      for (var w = 0; w < this.ddFrameWorkers.length; w++) {
-        const worker = this.ddFrameWorkers[w]
-        const offset = w
-        worker.postMessage({
-          scvvJSON: this.scvvJSON,
-          offset,
-          numWorkers: this.numWorkers
-        })
+    const loadSCVVWorkerMessage = msg => {
+      const { error, dict } = msg.data
+      // console.log("gotMessage", error)
+      if (error) {
+        console.log("error with ddFrameWorker", error)
+        if (dict && dict.frame) {
+          this.badFrames[dict.frame.mesh_path] = dict.frame
+        }
+        // this.callHoxelWorkers()
+      } else if (dict && dict.frame) {
+        this.addFrameBuffer(dict.frame)
       }
+    }
+
+    // Check if we have our worker
+    if (!this.loadSCVVWorker) {
+      this.loadSCVVWorker = await createLoadSCVVWorker()
+    }
+    this.loadSCVVWorker.onmessage = loadSCVVWorkerMessage
+
+    if (this.newFrames.length > 0) {
+      this.loadSCVVWorker.postMessage({
+        scvvJSON: this.scvvJSON
+      })
     }
   },
 
@@ -408,6 +390,7 @@ AFRAME.registerComponent("scvv", {
    */
   addFrameBuffer(frame) {
     // console.log("addFrameBuffer", frame.mesh_path)
+    // NOTE: this is a really annoying side of the Worker, it loses the BufferGeometry object
     let geometry = new THREE.BufferGeometry()
     // copy over all the attributes
     for (var prop in frame.mesh_geometry) {
@@ -448,7 +431,7 @@ AFRAME.registerComponent("scvv", {
       "uid"
     ]).slice(start)
     this.frameIdx = this.frameIdx >= start ? this.frameIdx - start : 0
-    console.log(`bufferedFrames ${this.bufferedFrames.length}`)
+    // console.log(`bufferedFrames ${this.bufferedFrames.length}`)
     // console.log(`frameIdx ${this.frameIdx}`)
 
     if (this.bufferedFrames.length > this.minBuffered) {
@@ -499,6 +482,9 @@ AFRAME.registerComponent("scvv", {
     })
   },
 
+  /**
+   * Stream audio from the live streaming server
+   */
   streamAudio() {
     const { scvvJSON } = this
     const { HOXEL_URL } = scvvJSON
@@ -513,11 +499,13 @@ AFRAME.registerComponent("scvv", {
     let audioCtx = this.audioCtx
     let bufferedAudio = []
 
+    /**
+     * Fetch all the latest audio binary files from the server
+     */
     const fetchLatestAudio = () => {
       const audioURL = `${HOXEL_URL}/audio.json?${Date.now()}`
       // console.log('download latest audio', audioURL)
       return downloadBin(audioURL, "json").then(json => {
-        // console.log('got audio json', json)
         const { timestamp, scvv_audio } = json
         // Only playback new timestamps
         if (this.lastAudioTimestamp >= timestamp) {
@@ -526,24 +514,17 @@ AFRAME.registerComponent("scvv", {
         }
         this.lastAudioTimestamp = timestamp
         const downloadPromises = []
-        // For the first one download all the previous audios too
-        // if (bufferedAudio.length == 0) {
-        //   _.forEach(json.frames, af => {
-        //     // console.log('downloading all audio', af.scvv_audio)
-        //     downloadPromises.push(
-        //       downloadBin(`${HOXEL_URL}/${af.scvv_audio}`, 'arraybuffer')
-        //     )
-        //   })
-        // } else {
-        // console.log('downloading fresh audio', scvv_audio)
         downloadPromises.push(
           downloadBin(`${HOXEL_URL}/${scvv_audio}`, "arraybuffer")
         )
-        // }
         return Promise.all(downloadPromises)
       })
     }
 
+    /**
+     * Buffer the array of raw audio data
+     * @param {*} arr
+     */
     const bufferAudioFrame = arr => {
       _.forEach(arr, audioData => {
         if (audioData) {
@@ -560,7 +541,6 @@ AFRAME.registerComponent("scvv", {
 
           audioBuffer.getChannelData(numChannels - 1).set(floatAudio)
           bufferedAudio.push(audioBuffer)
-          // console.log(`bufferedAudio up to ${bufferedAudio.length}`)
         }
       })
       return
@@ -569,6 +549,9 @@ AFRAME.registerComponent("scvv", {
     let audioBuffersPlayed = 0
     const bufferThresh = 1
 
+    /**
+     * Playback the buffered audio buffers
+     */
     const playbackBufferedAudio = () => {
       if (bufferedAudio.length < audioBuffersPlayed + bufferThresh) {
         // We don't have any buffered audio, check back soon
@@ -576,31 +559,22 @@ AFRAME.registerComponent("scvv", {
         return setTimeout(playbackBufferedAudio, 100)
       }
       const buffer = bufferedAudio[audioBuffersPlayed++]
-      const source = audioCtx.createBufferSource()
-      // source.buffer = buffer
-      // connect the AudioBufferSourceNode to the
-      // destination so we can hear the sound
-      // source.connect(audioCtx.destination)
-
+      // Set the buffer on the positional audio
       this.positionalAudio.setBuffer(buffer)
       this.positionalAudio.setLoop(false)
       this.positionalAudio.setVolume(this.data.volume)
 
-      // start the source playing
-      source.onended = e => {
-        // console.log('finished playing buffer ', audioBuffersPlayed)
-        // playbackBufferedAudio()
-      }
-      // setTimeout(playbackBufferedAudio, buffer.duration * 1e3 - 10)
+      // start the playing audio, after this buffer's duration
       setTimeout(() => {
         setTimeout(playbackBufferedAudio, 0)
-        let time = buffer.duration * audioBuffersPlayed
-        // console.log(`playing buffer: ${buffer.duration} at ${time}`)
-        // source.start(time)
         this.positionalAudio.play()
       }, buffer.duration * 1e3)
     }
 
+    /**
+     * Master stream loop that constantly fetches latest raw audio binaries then
+     *  buffers that into ready to play audio buffers
+     */
     const streamLoop = () => {
       fetchLatestAudio()
         .then(bufferAudioFrame)
@@ -612,12 +586,14 @@ AFRAME.registerComponent("scvv", {
           // console.log('finally did the recursive bit')
         })
     }
+    // Kickoff the stream loop in the background
     setTimeout(streamLoop, 1)
+    // Delay some then playback the buffered audio
     setTimeout(playbackBufferedAudio, 200)
   },
 
   /**
-   * Starts playing audio given a scvv json file
+   * Starts playing audio given a scvv json file, not for live streaming.
    * @param {*} scvvJSON the scvvJSON object with SCVV info
    */
   playbackAudio() {
