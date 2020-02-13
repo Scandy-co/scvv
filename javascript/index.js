@@ -667,13 +667,13 @@ AFRAME.registerComponent("scvv", {
       this.isPlaying &&
       this.shouldPlay &&
       this.audioCtx &&
-      this.audioBuffer &&
       !!this.bufferedFrames &&
       this.bufferedFrames.length > this.minBuffered
     ) {
       // Start the audio on the first frame
       if (
         !this.scvvJSON.isStreaming &&
+        this.audioBuffer &&
         this.frameIdx == 0 &&
         !this.audioPlaying
       ) {
