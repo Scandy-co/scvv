@@ -6,6 +6,7 @@ const { downloadBin, downloadAudioBuffer } = require("./utils")
 let LoadSCVVWorker = null
 
 const production = process.env.NODE_ENV == "production"
+const packageVersion = process.env.PACKAGE_VERSION || "latest"
 if (production) {
   // TODO: make this part of webpack!
 } else {
@@ -23,7 +24,7 @@ const createLoadSCVVWorker = () => {
     } else {
       // TODO: make this part of webpack!
       return downloadBin(
-        "https://s3.amazonaws.com/hoxel-streamed-001/LoadSCVVWorker.js",
+        `${HOXEL_JS_CDN_URL}/${packageVersion}/LoadSCVVWorker.js`,
         "blob"
       ).then(blob => {
         LoadSCVVWorker = window.URL.createObjectURL(blob)
