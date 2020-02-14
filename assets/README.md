@@ -4,7 +4,6 @@ This directory is in the gitignore so you don't accidentally populate more big a
 
 Having to use `git add -f assets/myNewAsset` is a good thing!
 
-
 ## hoxelCardHelloWorld
 
 A few seconds long SCVV recording of @hcwiley holding a hoxel flyer and waving to the camera.
