@@ -6,7 +6,7 @@ const { downloadBin, downloadAudioBuffer } = require("./utils")
 let LoadSCVVWorker = null
 
 const production = process.env.NODE_ENV == "production"
-const packageVersion = process.env.PACKAGE_VERSION || "latest"
+const PACKAGE_VERSION = process.env.PACKAGE_VERSION || "latest"
 if (production) {
   // TODO: make this part of webpack!
 } else {
@@ -22,9 +22,12 @@ const createLoadSCVVWorker = () => {
     if (LoadSCVVWorker) {
       return new Worker(LoadSCVVWorker)
     } else {
+      const HOXEL_JS_CDN_URL =
+        process.env.HOXEL_JS_CDN_URL ||
+        "https://hoxel-js-cdn.s3.us-east-2.amazonaws.com/releases"
       // TODO: make this part of webpack!
       return downloadBin(
-        `${HOXEL_JS_CDN_URL}/${packageVersion}/LoadSCVVWorker.js`,
+        `${HOXEL_JS_CDN_URL}/${PACKAGE_VERSION}/LoadSCVVWorker.js`,
         "blob"
       ).then(blob => {
         LoadSCVVWorker = window.URL.createObjectURL(blob)
@@ -70,10 +73,12 @@ AFRAME.registerComponent("scvv", {
     }
   },
 
+  hoxelUrl: `${window.location.href}/streamed`,
   multiple: true,
   numWorkers: 1,
   scandyToThreeMat: new THREE.Matrix4(),
-  maxBufferedCount: 2000,
+  // Allow for a 10 minute recording at 40 fps
+  maxBufferedCount: 40 * 60 * 10,
   minBuffered: 3,
   delay_ms: 35,
   /**
@@ -123,13 +128,16 @@ AFRAME.registerComponent("scvv", {
 
   update(oldData) {
     var data = this.data
-    const HOXEL_URL = data.src
-    console.log(`updating scvv: ${HOXEL_URL}`)
-
     var srcChanged = data.src !== oldData.src
 
+    // Update if we got a valid src
+    if (data.src && data.src.length > 5) {
+      this.hoxelUrl = data.src
+    }
+
     // Reset all the things
-    if (srcChanged && HOXEL_URL && HOXEL_URL.length > 5) {
+    if (srcChanged) {
+      console.log(`updating scvv: ${this.hoxelUrl}`)
       this.setupBuffers()
       this.setupMesh()
       this.setupAudio()
@@ -140,7 +148,7 @@ AFRAME.registerComponent("scvv", {
 
   stopAudio() {
     if (this.positionalAudio && this.positionalAudio.isPlaying) {
-      console.log("this.positionalAudio.stop()", this.scvvJSON.HOXEL_URL)
+      console.log("this.positionalAudio.stop()", this.hoxelUrl)
       this.positionalAudio.stop()
     }
     this.audioPlaying = false
@@ -152,7 +160,7 @@ AFRAME.registerComponent("scvv", {
   startPlayback() {
     if (!this.shouldPlay) {
       this.shouldPlay = true
-      console.log("startPlayback()", this.scvvJSON.HOXEL_URL)
+      console.log("startPlayback()", this.hoxelUrl)
     }
   },
 
@@ -160,18 +168,17 @@ AFRAME.registerComponent("scvv", {
     if (this.shouldPlay) {
       this.shouldPlay = false
       this.stopAudio()
-      console.log("stopPlayback()", this.scvvJSON.HOXEL_URL)
+      console.log("stopPlayback()", this.hoxelUrl)
     }
   },
 
   downloadSCVVJSON() {
-    var data = this.data
-    const HOXEL_URL = data.src
     // Download the scvv json to get this party started
-    downloadBin(`${HOXEL_URL}/scvv.json`, "json")
+    // console.log("downloadSCVVJSON")
+    downloadBin(`${this.hoxelUrl}/scvv.json`, "json")
       .then(json => {
         this.scvvJSON = {
-          HOXEL_URL,
+          hoxelUrl: this.hoxelUrl,
           ...json
         }
         if (!this.scvvJSON.version) {
@@ -215,7 +222,17 @@ AFRAME.registerComponent("scvv", {
             1
           )
         }
-        // console.log('got json', HOXEL_URL)
+        if (this.scvvJSON.isStreaming) {
+          const downloadDelay = this.newFrames.length > 4 ? 700 : 300
+          setTimeout(() => {
+            this.downloadSCVVJSON()
+          }, downloadDelay)
+          this.maxBufferedCount = 500
+          this.minBuffered = 5
+        } else {
+          this.minBuffered = this.scvvJSON.frames.length * 0.6
+        }
+
         if (this.scvvJSON) {
           if (this.scvvJSON.isStreaming && !this.audioPlaying) {
             this.streamAudio()
@@ -225,19 +242,15 @@ AFRAME.registerComponent("scvv", {
               .catch(err => {})
           }
         }
-        this.callHoxelWorkers()
 
-        if (this.scvvJSON.isStreaming) {
-          setTimeout(this.downloadSCVVJSON(), 900)
-          this.maxBufferedCount = 50
-        } else {
-          this.minBuffered = this.scvvJSON.frames.length * 0.6
-          this.maxBufferedCount = 5000
-        }
+        // We've got scvvJSON data, send it to the worker
+        this.callHoxelWorkers()
       })
       .catch(err => {
         console.log("error downloading json", err)
-        setTimeout(this.downloadSCVVJSON(), 700)
+        setTimeout(() => {
+          this.downloadSCVVJSON()
+        }, 2000)
       })
   },
 
@@ -378,6 +391,7 @@ AFRAME.registerComponent("scvv", {
     }
     this.loadSCVVWorker.onmessage = loadSCVVWorkerMessage
 
+    // console.log(`newFrames: ${this.newFrames.length}`)
     if (this.newFrames.length > 0) {
       this.loadSCVVWorker.postMessage({
         scvvJSON: this.scvvJSON
@@ -415,28 +429,25 @@ AFRAME.registerComponent("scvv", {
     // Fix the orientation for THREE from ScandyCore
     frame.mesh_geometry = geometry
 
-    // Merge all the mesh frames together keeping them in order
-    const bufferedFrames = {}
-    _.forEach(this.bufferedFrames.slice(), f => {
-      bufferedFrames[f["uid"]] = f
-    })
-    bufferedFrames[frame["uid"]] = frame
+    // Get the previously buffered frames to append to
+    const previousBuffered = this.bufferedFrames.slice()
+    previousBuffered.push(frame)
 
-    let bufferCount = Object.keys(bufferedFrames).length
+    const bufferCount = previousBuffered.length
     let start = 0
     if (bufferCount > this.maxBufferedCount) {
+      // Offset our start by the amount we are over the max buffer count
       start = bufferCount - this.maxBufferedCount
+      // Update the current frame idx.
+      // Checking to make sure we don't make frameIdx negative
+      this.frameIdx = this.frameIdx >= start ? this.frameIdx - start : 0
     }
-    // Only keep the most recent ones
-    this.bufferedFrames = _.sortBy(Object.values(bufferedFrames), [
-      "uid"
-    ]).slice(start)
-    this.frameIdx = this.frameIdx >= start ? this.frameIdx - start : 0
-    // console.log(`bufferedFrames ${this.bufferedFrames.length}`)
-    // console.log(`frameIdx ${this.frameIdx}`)
 
-    if (this.bufferedFrames.length > this.minBuffered) {
-      if (this.data.autoplay) {
+    // Sort by uid (timestamp) and only keep the most recent ones
+    this.bufferedFrames = _.sortBy(previousBuffered, ["uid"]).slice(start)
+
+    if (!this.shouldPlay && this.data.autoplay) {
+      if (this.bufferedFrames.length > this.minBuffered) {
         this.startPlayback()
       }
     }
@@ -465,7 +476,7 @@ AFRAME.registerComponent("scvv", {
         resolve(this.audioBuffer)
       } else if (!this.downloadingAudioBuffer) {
         if (scvvJSON.audio) {
-          let src = `${scvvJSON.HOXEL_URL}/${scvvJSON.audio}`
+          let src = `${scvvJSON.hoxelUrl}/${scvvJSON.audio}`
           this.downloadingAudioBuffer = true
           downloadAudioBuffer(audioCtx, src)
             .then(buffer => {
@@ -487,8 +498,7 @@ AFRAME.registerComponent("scvv", {
    * Stream audio from the live streaming server
    */
   streamAudio() {
-    const { scvvJSON } = this
-    const { HOXEL_URL } = scvvJSON
+    const { scvvJSON, hoxelUrl } = this
 
     if (scvvJSON.isStreaming && !this.audioPlaying) {
       this.audioPlaying = true
@@ -504,7 +514,7 @@ AFRAME.registerComponent("scvv", {
      * Fetch all the latest audio binary files from the server
      */
     const fetchLatestAudio = () => {
-      const audioURL = `${HOXEL_URL}/audio.json?${Date.now()}`
+      const audioURL = `${hoxelUrl}/audio.json?${Date.now()}`
       // console.log('download latest audio', audioURL)
       return downloadBin(audioURL, "json").then(json => {
         const { timestamp, scvv_audio } = json
@@ -516,7 +526,7 @@ AFRAME.registerComponent("scvv", {
         this.lastAudioTimestamp = timestamp
         const downloadPromises = []
         downloadPromises.push(
-          downloadBin(`${HOXEL_URL}/${scvv_audio}`, "arraybuffer")
+          downloadBin(`${hoxelUrl}/${scvv_audio}`, "arraybuffer")
         )
         return Promise.all(downloadPromises)
       })
@@ -528,8 +538,11 @@ AFRAME.registerComponent("scvv", {
      */
     const bufferAudioFrame = arr => {
       _.forEach(arr, audioData => {
-        if (audioData) {
+        if (!!audioData) {
           let floatAudio = new Float32Array(audioData)
+          if (floatAudio.length < 10) {
+            return
+          }
           // Create an empty mono channel buffer at the sample rate of the AudioContext
           const numChannels = 1
           let sampleRate = audioCtx.sampleRate
@@ -568,7 +581,9 @@ AFRAME.registerComponent("scvv", {
       // start the playing audio, after this buffer's duration
       setTimeout(() => {
         setTimeout(playbackBufferedAudio, 0)
-        this.positionalAudio.play()
+        if (!this.positionalAudio.isPlaying) {
+          this.positionalAudio.play()
+        }
       }, buffer.duration * 1e3)
     }
 
@@ -580,17 +595,17 @@ AFRAME.registerComponent("scvv", {
       fetchLatestAudio()
         .then(bufferAudioFrame)
         .catch(err => {
-          console.log("Error with streamingAudio", err)
+          // console.log("Error with streamingAudio", err)
         })
         .finally(() => {
-          setTimeout(streamLoop, 15)
+          setTimeout(streamLoop, 35)
           // console.log('finally did the recursive bit')
         })
     }
     // Kickoff the stream loop in the background
     setTimeout(streamLoop, 1)
     // Delay some then playback the buffered audio
-    setTimeout(playbackBufferedAudio, 200)
+    setTimeout(playbackBufferedAudio, this.minBuffered * 40 + 3000)
   },
 
   /**
@@ -634,6 +649,7 @@ AFRAME.registerComponent("scvv", {
    */
   displaySCVVFrame(frame) {
     if (!!frame && !!frame.mesh_geometry && !!frame.texture_blob) {
+      // console.log(`total: ${Date.now() - frame.seen}`)
       this.scvvTextureImage.src = frame.texture_blob
       // Account for rendering overhead
       let renderDelayMs = 7
@@ -642,11 +658,7 @@ AFRAME.registerComponent("scvv", {
         renderMs = renderMs - this.lastRenderMs
       }
       this.lastRenderMs = renderMs
-      if (this.scvvJSON.isStreaming) {
-        this.delay_ms = 35
-      } else {
-        this.delay_ms = Math.floor(frame.delay_us * 1e-3) - renderDelayMs
-      }
+
       this.mesh.geometry = frame.mesh_geometry
       if (!this.mesh.material.map) {
         this.mesh.material = this.material
@@ -654,6 +666,27 @@ AFRAME.registerComponent("scvv", {
         this.mesh.material.needsUpdate = true
         this.scvvTexture.needsUpdate = true
       }
+
+      if (this.scvvJSON.isStreaming) {
+        // TODO: figure out better algorithmic way to throttle this
+        const mult = 19
+        const min = 45
+        if (this.framesLeft >= mult) {
+          this.delay_ms = min
+        } else {
+          const max = 180
+          this.delay_ms = max - mult * this.framesLeft
+          if (this.delay_ms < min) {
+            this.delay_ms = min
+          }
+        }
+      } else {
+        this.delay_ms = Math.floor(frame.delay_us * 1e-3) - renderDelayMs
+      }
+
+      // console.log(
+      //   `delay: ${this.delay_ms}\tframesLeft: ${this.framesLeft}\tnewFrames: ${this.newFrames.length}`
+      // )
     }
   },
 
@@ -681,14 +714,16 @@ AFRAME.registerComponent("scvv", {
         this.playbackAudio()
       }
       if (this.deltas >= this.delay_ms) {
+        // Check to make sure the requested frameIdx is in the buffer
+        const lastIdx = this.bufferedFrames.length - 1
+        const nextIdx = this.frameIdx + 1
+        this.framesLeft = lastIdx - this.frameIdx
+
         this.displaySCVVFrame(this.bufferedFrames[this.frameIdx])
         this.vv_frame_ms += this.deltas
         this.deltas = 0
 
-        // Check to make sure the requested frameIdx is in the buffer
-        const lastIdx = this.bufferedFrames.length - 1
-        this.frameIdx = this.frameIdx + 1
-        if (this.frameIdx >= lastIdx) {
+        if (nextIdx >= lastIdx) {
           if (this.data.loop) {
             // Check to see if we need to stop the audio
             if (this.positionalAudio.isPlaying) {
@@ -699,6 +734,9 @@ AFRAME.registerComponent("scvv", {
           } else {
             this.frameIdx = lastIdx
           }
+          // console.log(`over: ${nextIdx} >= ${lastIdx}`)
+        } else {
+          this.frameIdx = nextIdx
         }
       }
     }
