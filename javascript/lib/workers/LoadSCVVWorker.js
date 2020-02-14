@@ -60,8 +60,8 @@ const decoderModules = []
 const unbufferedFrames = {}
 const bufferedFrames = {}
 const decodedFrames = {}
-const MAX_CONCURRENT_BUFFER = 50
-const MAX_CONCURRENT_DECODE = 150
+const MAX_CONCURRENT_BUFFER = 10
+const MAX_CONCURRENT_DECODE = 50
 
 const verbosity = 0
 const nativeAttributeMap = {
@@ -403,6 +403,7 @@ const processDracoFrame = frame => {
     .then(mesh_geometry => {
       const uid = getFrameUid(frame)
       decodedFrames[frame.uid] = true
+      // console.log(`total: ${Date.now() - frame.seen}`)
       delete bufferedFrames[frame.uid]
       postMessage({
         error: null,
@@ -483,7 +484,7 @@ const decodeSCMFFrames = (frames, sdf, adsf) => {
 
 const bufferFrame = (frame, idx) => {
   // Get all the mesh binaries
-  const meshFrameBinSrc = `${scvvJSON.HOXEL_URL}/${frame.mesh_path}`
+  const meshFrameBinSrc = `${scvvJSON.hoxelUrl}/${frame.mesh_path}`
   let isDraco = false
   if (meshFrameBinSrc.match(".draco") || meshFrameBinSrc.match(".drc")) {
     isDraco = true
@@ -512,7 +513,7 @@ const bufferFrame = (frame, idx) => {
     })
     .then(new_frame => {
       return downloadBin(
-        `${scvvJSON.HOXEL_URL}/${frame.texture_path}`,
+        `${scvvJSON.hoxelUrl}/${frame.texture_path}`,
         "blob"
       ).then(blob => {
         // console.log(`image ${idx} done`)
@@ -535,7 +536,7 @@ const bufferFrame = (frame, idx) => {
     })
   /* TODO: add support for this kind too?
   if (frame.points_path) {
-      let meshFrameBinSrc = `${scvvJSON.HOXEL_URL}/${frame.points_path}`
+      let meshFrameBinSrc = `${scvvJSON.hoxelUrl}/${frame.points_path}`
       // Get all the mesh binaries
       frame_promises.push(
         downloadBin(meshFrameBinSrc, "arraybuffer").then(points_bin => {
@@ -546,7 +547,7 @@ const bufferFrame = (frame, idx) => {
           }
         })
       )
-      meshFrameBinSrc = `${scvvJSON.HOXEL_URL}/${frame.faces_path}`
+      meshFrameBinSrc = `${scvvJSON.hoxelUrl}/${frame.faces_path}`
       // Get all the mesh binaries
       frame_promises.push(
         downloadBin(meshFrameBinSrc, "arraybuffer").then(faces_bin => {
@@ -588,6 +589,7 @@ const processSCVVJSON = async (offset, numWorkers) => {
       unbufferedFrames[uid] = {
         uid,
         idx,
+        seen: Date.now(),
         ...frame
       }
     }
@@ -634,7 +636,7 @@ const processSCVVJSON = async (offset, numWorkers) => {
     // )
     setTimeout(() => {
       processSCVVJSON(offset, numWorkers)
-    }, 100)
+    }, 33)
   })
 }
 
@@ -642,8 +644,8 @@ onmessage = async msg => {
   if (msg.data) {
     const { offset, numWorkers } = msg.data
     scvvJSON = msg.data.scvvJSON
-    if (scvvJSON.HOXEL_URL.indexOf("http") == -1) {
-      scvvJSON.HOXEL_URL = `https:${scvvJSON.HOXEL_URL}`
+    if (scvvJSON.hoxelUrl.indexOf("http") == -1) {
+      scvvJSON.hoxelUrl = `https:${scvvJSON.hoxelUrl}`
     }
     // Only queue a processing job if we aren't already processing
     if (!isProcessing) {
