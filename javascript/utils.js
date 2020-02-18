@@ -14,14 +14,14 @@
  * @param {*} responseType ['arraybuffer', 'blob', 'json', 'text']
  * @param {*} timeout How many milliseconds wait until timeout on request
  */
-const downloadBin = (url, responseType='arraybuffer', timeout = 10000) =>
+const downloadBin = (url, responseType = "arraybuffer", timeout = 10000) =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     /* NOTE: you want to do this, but you can't.. its forbidden
        https://developer.mozilla.org/en-US/docs/Glossary/Forbidden_header_name
        xhr.setRequestHeaders('accept-encoding','gzip')
     */
-    xhr.open('GET', url, true)
+    xhr.open("GET", url, true)
 
     xhr.async = true
     xhr.timeout = timeout
@@ -35,8 +35,8 @@ const downloadBin = (url, responseType='arraybuffer', timeout = 10000) =>
         reject(new Error(`No buffer`))
       }
     }
-    xhr.onerror = () => reject(new Error('error loading frame asset'))
-    xhr.ontimeout = () => reject(new Error('Connection timeout'))
+    xhr.onerror = () => reject(new Error("error loading frame asset"))
+    xhr.ontimeout = () => reject(new Error("Connection timeout"))
     xhr.send(null)
   })
 module.exports.downloadBin = downloadBin
@@ -45,7 +45,7 @@ const downloadAudioBuffer = (audioCtx, url) =>
   // thanks to https://middleearmedia.com/web-audio-api-bufferloader/
   // for the original reference
   new Promise((resolve, reject) => {
-    downloadBin(url, 'arraybuffer')
+    downloadBin(url, "arraybuffer")
       .then(arrayBuffer => {
         // Asynchronously decode the audio file data in arrayBuffer
         audioCtx.decodeAudioData(
@@ -62,3 +62,47 @@ const downloadAudioBuffer = (audioCtx, url) =>
       .catch(reject)
   })
 module.exports.downloadAudioBuffer = downloadAudioBuffer
+
+const getSCVVTransform = version => {
+  if (!version) {
+    return [
+      -0.0,
+      -1.0,
+      0.0,
+      0.0,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1
+    ]
+  } else if (version == "0.1.0") {
+    // Fix perspective for 0.1.0
+    return [
+      -0.0,
+      -1.0,
+      0.0,
+      0.0,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1
+    ]
+  }
+}
+module.exports.getSCVVTransform = getSCVVTransform
