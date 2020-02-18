@@ -1,7 +1,7 @@
 /* global AFRAME, THREE */
 const _ = require("lodash")
 
-const { downloadBin, downloadAudioBuffer } = require("./utils")
+const { downloadBin, downloadAudioBuffer, getSCVVTransform } = require("./utils")
 
 let LoadSCVVWorker = null
 
@@ -68,15 +68,26 @@ AFRAME.registerComponent("scvv", {
     refDistance: { default: 1 },
     rolloffFactor: { default: 5 },
     volume: { default: 1 },
+    imageTarget: {
+      type: "string",
+      default: ""
+    },
+    imageTargetLostThresh: { default: 2000 },
     src: {
-      type: "string"
+      type: "string",
+      default: ""
     }
   },
 
-  hoxelUrl: `${window.location.href}/streamed`,
+  // tell AFrame that there can be multiple SCVV components
   multiple: true,
-  numWorkers: 1,
-  scandyToThreeMat: new THREE.Matrix4(),
+
+  hoxelUrl: `${window.location.href}/streamed`,
+  use8thWall: false,
+  finishedLoading8thWall: true,
+
+  meshGroup: new THREE.Group(),
+  scandyToThreeMat: null,
   // Allow for a 10 minute recording at 40 fps
   maxBufferedCount: 40 * 60 * 10,
   minBuffered: 3,
@@ -94,15 +105,16 @@ AFRAME.registerComponent("scvv", {
     this.setupBuffers()
     this.setupMesh()
 
+    this.setup8thWall()
+
     // Trying to fix audio on iOS being a jerk
     const fixAudioContext = () => {
       this.setAudioContext()
       if (this.audioCtx.state == "suspended") {
         this.audioCtx.resume()
-        // document.addEventListener('touchend', fixAudioContext);
       }
       this.setupAudio()
-      document.removeEventListener("touchend", fixAudioContext)
+      document.removeEventListener("touchstart", fixAudioContext)
 
       // Pre-fetch the audio now as well
       this.getAudioBuffer()
@@ -110,8 +122,9 @@ AFRAME.registerComponent("scvv", {
         .catch(err => {})
     }
 
-    if (isMobileDevice()) {
-      document.addEventListener("touchend", fixAudioContext)
+    // Fix the audio context when not using 8th wall on mobile
+    if (!this.use8thWall && isMobileDevice()) {
+      document.addEventListener("touchstart", fixAudioContext)
     } else {
       this.setAudioContext()
       this.setupAudio()
@@ -124,6 +137,81 @@ AFRAME.registerComponent("scvv", {
       latencyHint: "interactive",
       sampleRate: 44100
     })
+  },
+
+  setup8thWall() {
+    const { object3D, sceneEl } = this.el
+    const { imageTarget } = this.data
+
+    let lastImageUpdate = false
+
+    const showImage = event => {
+      const { detail, type } = event
+      if (imageTarget != detail.name) {
+        return
+      }
+
+      lastImageUpdate = Date.now()
+      // console.log(event)
+      // Always update the position and rotation
+      this.meshGroup.position.copy(detail.position)
+      this.meshGroup.quaternion.copy(detail.rotation)
+
+      // Only update the scale on image found
+      if (type == "xrimagefound") {
+        // console.log("found it")
+        const newScale = this.el.getAttribute("scale")
+        newScale.x *= detail.scale
+        newScale.y *= detail.scale
+        newScale.z *= detail.scale
+        // console.log(newScale)
+        this.meshGroup.scale.set(newScale.x, newScale.y, newScale.z)
+        object3D.visible = true
+        this.startPlayback()
+      }
+    }
+
+    const hideImage = ({ detail }) => {
+      if (imageTarget != detail.name) {
+        return
+      }
+      // Debounce the image being lost briefly
+      setTimeout(() => {
+        if (
+          Math.abs(Date.now() - lastImageUpdate) >
+          this.data.imageTargetLostThresh
+        ) {
+          // console.log("lost it for real")
+          object3D.visible = false
+          this.stopPlayback()
+        }
+      }, this.data.imageTargetLostThresh)
+    }
+
+    if (!!sceneEl.getAttribute("xrweb")) {
+      this.finishedLoading8thWall = false
+      this.use8thWall = true
+      object3D.visible = false
+
+      // Bind the 8thWall finished loading callback
+      sceneEl.addEventListener("realityready", () => {
+        this.finishedLoading8thWall = true
+      })
+
+      // Check if we are using image targets
+      if (imageTarget.length > 0) {
+        // Don't autoplay if we're using image targets
+        this.data.autoplay = false
+
+        sceneEl.addEventListener("xrimagefound", showImage)
+        sceneEl.addEventListener("xrimageupdated", showImage)
+        sceneEl.addEventListener("xrimagelost", hideImage)
+      }
+    } else {
+      // Update our component to not be using 8thWall
+      this.finishedLoading8thWall = true
+      this.use8thWall = false
+    }
   },
 
   update(oldData) {
@@ -140,14 +228,13 @@ AFRAME.registerComponent("scvv", {
       console.log(`updating scvv: ${this.hoxelUrl}`)
       this.setupBuffers()
       this.setupMesh()
-      this.setupAudio()
 
       this.downloadSCVVJSON()
     }
   },
 
   stopAudio() {
-    if (this.positionalAudio && this.positionalAudio.isPlaying) {
+    if (!!this.positionalAudio && this.positionalAudio.isPlaying) {
       console.log("this.positionalAudio.stop()", this.hoxelUrl)
       this.positionalAudio.stop()
     }
@@ -172,90 +259,7 @@ AFRAME.registerComponent("scvv", {
     }
   },
 
-  downloadSCVVJSON() {
-    // Download the scvv json to get this party started
-    // console.log("downloadSCVVJSON")
-    downloadBin(`${this.hoxelUrl}/scvv.json`, "json")
-      .then(json => {
-        this.scvvJSON = {
-          hoxelUrl: this.hoxelUrl,
-          ...json
-        }
-        if (!this.scvvJSON.version) {
-          // Fix perspective for pre-versioning
-          this.scandyToThreeMat.set(
-            -0.0,
-            -1.0,
-            0.0,
-            0.0,
-            -1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1
-          )
-        } else if (this.scvvJSON.version == "0.1.0") {
-          // Fix perspective for 0.1.0
-          this.scandyToThreeMat.set(
-            -0.0,
-            -1.0,
-            0.0,
-            0.0,
-            -1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            -1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1
-          )
-        }
-        if (this.scvvJSON.isStreaming) {
-          const downloadDelay = this.newFrames.length > 4 ? 700 : 300
-          setTimeout(() => {
-            this.downloadSCVVJSON()
-          }, downloadDelay)
-          this.maxBufferedCount = 500
-          this.minBuffered = 5
-        } else {
-          this.minBuffered = this.scvvJSON.frames.length * 0.6
-        }
-
-        if (this.scvvJSON) {
-          if (this.scvvJSON.isStreaming && !this.audioPlaying) {
-            this.streamAudio()
-          } else if (this.scvvJSON.audio) {
-            this.getAudioBuffer()
-              .then(() => {})
-              .catch(err => {})
-          }
-        }
-
-        // We've got scvvJSON data, send it to the worker
-        this.callHoxelWorkers()
-      })
-      .catch(err => {
-        console.log("error downloading json", err)
-        setTimeout(() => {
-          this.downloadSCVVJSON()
-        }, 2000)
-      })
-  },
-
   remove() {
-    var el = this.el
     if (this.jsonDownloader) {
       clearInterval(this.jsonDownloader)
     }
@@ -263,7 +267,7 @@ AFRAME.registerComponent("scvv", {
     this.el.removeObject3D("mesh")
     this.mesh = null
     this.material = null
-    if (this.positionalAudio.isPlaying) this.positionalAudio.stop()
+    if (!!this.positionalAudio && this.positionalAudio.isPlaying) this.positionalAudio.stop()
     this.audioPlaying = false
     // this.positionalAudio = null
     this.group = null
@@ -315,9 +319,11 @@ AFRAME.registerComponent("scvv", {
     })
     let geometry = new THREE.SphereGeometry(0.3, 100, 100)
     this.mesh = new THREE.Mesh(geometry, this.loadingMaterial)
+    this.meshGroup = new THREE.Group()
+    this.meshGroup.add(this.mesh)
 
     this.group = new THREE.Group()
-    this.group.add(this.mesh)
+    this.group.add(this.meshGroup)
 
     el.setObject3D("mesh", this.group)
   },
@@ -348,6 +354,54 @@ AFRAME.registerComponent("scvv", {
     // this.group.add(this.positionalAudio)
     // Or should we add it as an element?
     el.setObject3D("sound", this.positionalAudio)
+  },
+
+  downloadSCVVJSON() {
+    // Download the scvv json to get this party started
+    // console.log("downloadSCVVJSON")
+    downloadBin(`${this.hoxelUrl}/scvv.json`, "json")
+      .then(json => {
+        this.scvvJSON = {
+          hoxelUrl: this.hoxelUrl,
+          ...json
+        }
+
+        // Fix perspective for pre-versioning
+        if (!this.scandyToThreeMat) {
+          this.scandyToThreeMat = new THREE.Matrix4()
+          this.scandyToThreeMat.fromArray(getSCVVTransform(this.scvvJSON.version))
+        }
+
+        if (this.scvvJSON.isStreaming) {
+          const downloadDelay = this.newFrames.length > 4 ? 700 : 300
+          setTimeout(() => {
+            this.downloadSCVVJSON()
+          }, downloadDelay)
+          this.maxBufferedCount = 500
+          this.minBuffered = 5
+        } else {
+          this.minBuffered = this.scvvJSON.frames.length * 0.6
+        }
+
+        if (this.scvvJSON) {
+          if (this.scvvJSON.isStreaming && !this.audioPlaying) {
+            this.streamAudio()
+          } else if (this.scvvJSON.audio) {
+            this.getAudioBuffer()
+              .then(() => {})
+              .catch(err => {})
+          }
+        }
+
+        // We've got scvvJSON data, send it to the worker
+        this.callHoxelWorkers()
+      })
+      .catch(err => {
+        console.log("error downloading json", err)
+        setTimeout(() => {
+          this.downloadSCVVJSON()
+        }, 2000)
+      })
   },
 
   /**
@@ -423,10 +477,6 @@ AFRAME.registerComponent("scvv", {
     }
     // And the indices
     geometry.setIndex(new THREE.BufferAttribute(frame.mesh_geometry.indices, 1))
-    // Fix the orientation for THREE from ScandyCore
-    geometry.applyMatrix(this.scandyToThreeMat)
-    geometry.computeBoundingSphere()
-    // Fix the orientation for THREE from ScandyCore
     frame.mesh_geometry = geometry
 
     // Get the previously buffered frames to append to
@@ -441,6 +491,14 @@ AFRAME.registerComponent("scvv", {
       // Update the current frame idx.
       // Checking to make sure we don't make frameIdx negative
       this.frameIdx = this.frameIdx >= start ? this.frameIdx - start : 0
+    }
+
+    // After n frames check apply the matrix offset and compute the z offset
+    if (bufferCount == 1) {
+      geometry.computeBoundingSphere()
+      const offset = geometry.boundingSphere.radius / -2
+      this.mesh.position.set(0, 0, offset)
+      this.mesh.applyMatrix(this.scandyToThreeMat)
     }
 
     // Sort by uid (timestamp) and only keep the most recent ones
@@ -460,17 +518,18 @@ AFRAME.registerComponent("scvv", {
     const { scvvJSON } = this
 
     // Audio context and source global vars
-    this.audioCtx =
-      this.audioCtx || new (window.AudioContext || window.webkitAudioContext)()
     const { audioCtx } = this
-    if (!audioCtx) {
-      console.log("No AudioContext available")
-    }
 
     return new Promise((resolve, reject) => {
+      if (!audioCtx) {
+        // console.log("No AudioContext available")
+        reject("no audioCtx")
+        return
+      }
       if (!scvvJSON) {
         // Nothing to do with nothing here
-        reject()
+        reject("no scvvJSON")
+        return
       }
       if (this.audioBuffer) {
         resolve(this.audioBuffer)
@@ -488,7 +547,7 @@ AFRAME.registerComponent("scvv", {
               this.downloadingAudioBuffer = false
             })
         } else {
-          reject()
+          reject("no audio")
         }
       }
     })
@@ -632,7 +691,7 @@ AFRAME.registerComponent("scvv", {
       }
 
       // Download the audio buffer
-      this.getAudioBuffer(scvvJSON)
+      this.getAudioBuffer()
         .then(buffer => {
           this.positionalAudio.setBuffer(buffer)
           doPlay()
@@ -700,12 +759,13 @@ AFRAME.registerComponent("scvv", {
     if (
       this.isPlaying &&
       this.shouldPlay &&
-      this.audioCtx &&
+      this.finishedLoading8thWall &&
       !!this.bufferedFrames &&
       this.bufferedFrames.length > this.minBuffered
     ) {
       // Start the audio on the first frame
       if (
+        this.audioCtx &&
         !this.scvvJSON.isStreaming &&
         this.audioBuffer &&
         this.frameIdx == 0 &&
@@ -726,7 +786,7 @@ AFRAME.registerComponent("scvv", {
         if (nextIdx >= lastIdx) {
           if (this.data.loop) {
             // Check to see if we need to stop the audio
-            if (this.positionalAudio.isPlaying) {
+            if (!!this.positionalAudio && this.positionalAudio.isPlaying) {
               this.positionalAudio.stop()
               this.audioPlaying = false
             }
