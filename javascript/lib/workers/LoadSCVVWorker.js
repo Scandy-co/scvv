@@ -476,7 +476,7 @@ const bufferFrame = (frame, idx) => {
   }
   const dif = Date.now() - Math.floor(frame.uid * 1e-3)
   const staleThresh = scvvJSON.frameExpiration * 1e3 || 12e3
-  if (scvvJSON.isStreaming && dif > staleThresh) {
+  if (scvvJSON.isStreaming && dif > staleThresh && dif < staleThresh * 3) {
     const msg = `Frame expired` // with dif of: ${dif}`
     // return new Promise((resolve, reject) => {
     //   reject(msg)
