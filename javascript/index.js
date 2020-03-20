@@ -1,7 +1,11 @@
 /* global AFRAME, THREE */
 const _ = require("lodash")
 
-const { downloadBin, downloadAudioBuffer, getSCVVTransform } = require("./utils")
+const {
+  downloadBin,
+  downloadAudioBuffer,
+  getSCVVTransform
+} = require("./utils")
 
 let LoadSCVVWorker = null
 
@@ -29,10 +33,15 @@ const createLoadSCVVWorker = () => {
       return downloadBin(
         `${HOXEL_JS_CDN_URL}/${PACKAGE_VERSION}/LoadSCVVWorker.js`,
         "blob"
-      ).then(blob => {
-        LoadSCVVWorker = window.URL.createObjectURL(blob)
-        return new Worker(LoadSCVVWorker)
-      })
+      )
+        .then(blob => {
+          LoadSCVVWorker = window.URL.createObjectURL(blob)
+          return new Worker(LoadSCVVWorker)
+        })
+        .catch(() => {
+          // If it fails, try again
+          setTimeout(createLoadSCVVWorker, 300)
+        })
     }
   } else {
     return new LoadSCVVWorker()
@@ -267,7 +276,8 @@ AFRAME.registerComponent("scvv", {
     this.el.removeObject3D("mesh")
     this.mesh = null
     this.material = null
-    if (!!this.positionalAudio && this.positionalAudio.isPlaying) this.positionalAudio.stop()
+    if (!!this.positionalAudio && this.positionalAudio.isPlaying)
+      this.positionalAudio.stop()
     this.audioPlaying = false
     // this.positionalAudio = null
     this.group = null
@@ -369,7 +379,9 @@ AFRAME.registerComponent("scvv", {
         // Fix perspective for pre-versioning
         if (!this.scandyToThreeMat) {
           this.scandyToThreeMat = new THREE.Matrix4()
-          this.scandyToThreeMat.fromArray(getSCVVTransform(this.scvvJSON.version))
+          this.scandyToThreeMat.fromArray(
+            getSCVVTransform(this.scvvJSON.version)
+          )
         }
 
         if (this.scvvJSON.isStreaming) {
@@ -575,20 +587,24 @@ AFRAME.registerComponent("scvv", {
     const fetchLatestAudio = () => {
       const audioURL = `${hoxelUrl}/audio.json?${Date.now()}`
       // console.log('download latest audio', audioURL)
-      return downloadBin(audioURL, "json").then(json => {
-        const { timestamp, scvv_audio } = json
-        // Only playback new timestamps
-        if (this.lastAudioTimestamp >= timestamp) {
-          // throw 'audio timestamp not new enough'
-          return
-        }
-        this.lastAudioTimestamp = timestamp
-        const downloadPromises = []
-        downloadPromises.push(
-          downloadBin(`${hoxelUrl}/${scvv_audio}`, "arraybuffer")
-        )
-        return Promise.all(downloadPromises)
-      })
+      return downloadBin(audioURL, "json")
+        .then(json => {
+          const { timestamp, scvv_audio } = json
+          // Only playback new timestamps
+          if (this.lastAudioTimestamp >= timestamp) {
+            // throw 'audio timestamp not new enough'
+            return
+          }
+          this.lastAudioTimestamp = timestamp
+          const downloadPromises = []
+          downloadPromises.push(
+            downloadBin(`${hoxelUrl}/${scvv_audio}`, "arraybuffer")
+          )
+          return Promise.all(downloadPromises)
+        })
+        .catch(e => {
+          console.log("failed downloading latest audio")
+        })
     }
 
     /**
