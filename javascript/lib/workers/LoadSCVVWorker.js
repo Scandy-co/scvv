@@ -68,7 +68,7 @@ const nativeAttributeMap = {
   position: "POSITION",
   normal: "NORMAL",
   color: "COLOR",
-  uv: "TEX_COORD"
+  uv: "TEX_COORD",
 }
 
 /**
@@ -192,7 +192,7 @@ const addAttributeToGeometry = (
     numPoints,
     numValues,
     numComponents,
-    array
+    array,
   }
 
   dracoDecoder.destroy(attributeData)
@@ -387,17 +387,17 @@ const processDracoFrame = frame => {
   return decodeDracoFrame(frame)
     .then(mesh_geometry => {
       const uid = getFrameUid(frame)
-      decodedFrames[frame.uid] = true
+      decodedFrames[uid] = true
       // console.log(`total: ${Date.now() - frame.seen}`)
-      delete bufferedFrames[frame.uid]
+      delete bufferedFrames[uid]
       postMessage({
         error: null,
         dict: {
           frame: {
             mesh_geometry,
-            ...frame
-          }
-        }
+            ...frame,
+          },
+        },
       })
     })
     .catch(err => {
@@ -409,8 +409,8 @@ const processDracoFrame = frame => {
       postMessage({
         error: err.message,
         dict: {
-          frame
-        }
+          frame,
+        },
       })
     })
 }
@@ -445,24 +445,24 @@ const decodeSCMFFrames = (frames, sdf, adsf) => {
     frame.mesh_geometry = {
       uv: {
         array: meshPoints,
-        numComponents: 2
+        numComponents: 2,
       },
       position: {
         array: meshPoints,
-        numComponents: 3
+        numComponents: 3,
       },
       normal: {
         array: meshPoints,
-        numComponents: 3
+        numComponents: 3,
       },
-      indices: frame.faces_bin
+      indices: frame.faces_bin,
     }
 
     postMessage({
       error: null,
       dict: {
-        frame
-      }
+        frame,
+      },
     })
   })
 }
@@ -474,14 +474,15 @@ const bufferFrame = (frame, idx) => {
   if (meshFrameBinSrc.match(".draco") || meshFrameBinSrc.match(".drc")) {
     isDraco = true
   }
-  const dif = Date.now() - Math.floor(frame.uid * 1e-3)
+  const uid = getFrameUid(frame)
+  const dif = Date.now() - Math.floor(uid * 1e-3)
   const staleThresh = scvvJSON.frameExpiration * 1e3 || 12e3
   if (scvvJSON.isStreaming && dif > staleThresh) {
     const msg = `Frame expired` // with dif of: ${dif}`
     // return new Promise((resolve, reject) => {
     //   reject(msg)
     // })
-    delete unbufferedFrames[frame.uid]
+    delete unbufferedFrames[uid]
     // console.log(msg)
     return null
   }
@@ -493,7 +494,7 @@ const bufferFrame = (frame, idx) => {
         idx,
         mesh_bin,
         isDraco,
-        ...frame
+        ...frame,
       }
     })
     .then(new_frame => {
@@ -504,15 +505,15 @@ const bufferFrame = (frame, idx) => {
         // console.log(`image ${idx} done`)
         var imageUrl = URL.createObjectURL(blob)
         new_frame.texture_blob = imageUrl
-        bufferedFrames[frame.uid] = new_frame
-        delete unbufferedFrames[frame.uid]
-        return frame.uid
+        bufferedFrames[uid] = new_frame
+        delete unbufferedFrames[uid]
+        return uid
       })
     })
     .catch(err => {
       // throw new Error(`Error downloading ${idx}: ${err}`)
       console.log(
-        `error buffering ${meshFrameBinSrc} ${idx} with uid: ${frame.uid}:
+        `error buffering ${meshFrameBinSrc} ${idx} with uid: ${uid}:
         ${JSON.stringify(err)}`
       )
       // debugger
@@ -558,6 +559,8 @@ const processSCVVJSON = async (offset, numWorkers) => {
   // lastProcess = Date.now()
   // console.log(`processSCVVJSON`)
   // console.log(`processSCVVJSON ${timesProcessed++} started at ${lastProcess}`)
+
+  // assume the scvv.json has the frames sorted
   _.forEach(scvvJSON.frames, async (frame, idx) => {
     const uid = getFrameUid(frame)
     if (decodedFrames[uid]) {
@@ -575,7 +578,7 @@ const processSCVVJSON = async (offset, numWorkers) => {
         uid,
         idx,
         seen: Date.now(),
-        ...frame
+        ...frame,
       }
     }
   })
@@ -592,7 +595,6 @@ const processSCVVJSON = async (offset, numWorkers) => {
   let u_idx = 0
   const sortedUnBufferedFrames = _.sortBy(unbufferedFrames, ["uid"])
   _.forEach(sortedUnBufferedFrames, frame => {
-    const uid = frame.uid
     if (u_idx < MAX_CONCURRENT_BUFFER) {
       // console.log(`buffering frame ${idx}:`)
       all_promises.push(bufferFrame(frame, u_idx))
