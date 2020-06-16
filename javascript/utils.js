@@ -128,5 +128,27 @@ const getSCVVTransform = version => {
       1
     ]
   }
+
+  return [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+
+    0.0,
+    0.0,
+    0.0,
+    1
+  ]
 }
 module.exports.getSCVVTransform = getSCVVTransform
