@@ -4,7 +4,7 @@ const _ = require("lodash")
 const {
   downloadBin,
   downloadAudioBuffer,
-  getSCVVTransform
+  getSCVVTransform,
 } = require("./utils")
 
 let LoadSCVVWorker = null
@@ -32,7 +32,8 @@ const createLoadSCVVWorker = () => {
       // TODO: make this part of webpack!
       return downloadBin(
         `${HOXEL_JS_CDN_URL}/${PACKAGE_VERSION}/LoadSCVVWorker.js`,
-        "blob"
+        "blob",
+        30e3
       )
         .then(blob => {
           LoadSCVVWorker = window.URL.createObjectURL(blob)
@@ -69,23 +70,23 @@ AFRAME.registerComponent("scvv", {
   schema: {
     autoplay: { default: true },
     loop: { default: true },
-    maxDistance: { default: 10 },
     distanceModel: {
       default: "inverse",
-      oneOf: ["linear", "inverse", "exponential"]
+      oneOf: ["linear", "inverse", "exponential"],
     },
-    refDistance: { default: 1 },
-    rolloffFactor: { default: 5 },
-    volume: { default: 1 },
+    maxDistance: { type: "number", default: 10 },
+    refDistance: { type: "number", default: 1 },
+    rolloffFactor: { type: "number", default: 5 },
+    volume: { type: "number", default: 1 },
     imageTarget: {
       type: "string",
-      default: ""
+      default: "",
     },
-    imageTargetLostThresh: { default: 2000 },
+    imageTargetLostThresh: { type: "number", default: 2000 },
     src: {
       type: "string",
-      default: ""
-    }
+      default: "",
+    },
   },
 
   // tell AFrame that there can be multiple SCVV components
@@ -144,7 +145,7 @@ AFRAME.registerComponent("scvv", {
     var AudioContext = window.AudioContext || window.webkitAudioContext
     this.audioCtx = new AudioContext({
       latencyHint: "interactive",
-      sampleRate: 44100
+      sampleRate: 48000, // FIXME: stop using hard coded,
     })
   },
 
@@ -284,10 +285,23 @@ AFRAME.registerComponent("scvv", {
     this.setupBuffers()
   },
 
+  /**
+   * Helper function to safely dispose of the geometry and image data
+   * @param {*} frame
+   */
+  disposeFrame(frame) {
+    if (!!frame && !!frame.mesh_geometry && !!frame.texture_blob) {
+      frame.mesh_geometry.dispose()
+      URL.revokeObjectURL(frame.texture_blob)
+    }
+  },
+
   setupBuffers() {
     // console.log("setupBuffers()")
     this.ddFrameWorkers = []
     this.newFrames = []
+    // Make sure to dispose of frames when done
+    _.forEach(this.bufferedFrames, this.disposeFrame)
     this.bufferedFrames = []
     this.badFrames = {}
     this.seenFrames = {}
@@ -315,19 +329,20 @@ AFRAME.registerComponent("scvv", {
       // console.log('text')
       this.scvvTexture.needsUpdate = true
     }
-    this.material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      // color: 0x00ff00,
-      // opacity: 0.92,
-      // transparent: true,
-      side: THREE.DoubleSide
-    })
-    this.loadingMaterial = new THREE.MeshPhongMaterial({
+    // this.material = new THREE.MeshNormalMaterial({
+    // this.material = new THREE.MeshBasicMaterial({
+    // TODO: get these from the component attributes
+    let matProps = {
+      side: THREE.FrontSide,
+      roughness: 0.8,
+      metalness: 0.4,
+      refractionRatio: 0.0,
+    }
+    this.material = new THREE.MeshStandardMaterial(matProps)
+    this.loadingMaterial = new THREE.MeshNormalMaterial({
       color: 0x25c83e,
-      opacity: 0.7,
-      transparent: true
     })
-    let geometry = new THREE.SphereGeometry(0.3, 100, 100)
+    let geometry = new THREE.SphereGeometry(0.3, 36, 36)
     this.mesh = new THREE.Mesh(geometry, this.loadingMaterial)
     this.meshGroup = new THREE.Group()
     this.meshGroup.add(this.mesh)
@@ -369,11 +384,13 @@ AFRAME.registerComponent("scvv", {
   downloadSCVVJSON() {
     // Download the scvv json to get this party started
     // console.log("downloadSCVVJSON")
-    downloadBin(`${this.hoxelUrl}/scvv.json`, "json")
+
+    // $Date.now() to bust any caching issues
+    downloadBin(`${this.hoxelUrl}/scvv.json?${Date.now()}`, "json")
       .then(json => {
         this.scvvJSON = {
           hoxelUrl: this.hoxelUrl,
-          ...json
+          ...json,
         }
 
         // Fix perspective for pre-versioning
@@ -452,7 +469,7 @@ AFRAME.registerComponent("scvv", {
     }
 
     // Check if we have our worker
-    if (!this.loadSCVVWorker) {
+    while (!this.loadSCVVWorker) {
       this.loadSCVVWorker = await createLoadSCVVWorker()
     }
     this.loadSCVVWorker.onmessage = loadSCVVWorkerMessage
@@ -460,7 +477,7 @@ AFRAME.registerComponent("scvv", {
     // console.log(`newFrames: ${this.newFrames.length}`)
     if (this.newFrames.length > 0) {
       this.loadSCVVWorker.postMessage({
-        scvvJSON: this.scvvJSON
+        scvvJSON: this.scvvJSON,
       })
     }
   },
@@ -489,10 +506,15 @@ AFRAME.registerComponent("scvv", {
     }
     // And the indices
     geometry.setIndex(new THREE.BufferAttribute(frame.mesh_geometry.indices, 1))
+    // normals are only transmitted correctly post version 0.3.0
+    let version = this.scvvJSON.version.split(".")
+    if (!version || version[1] < 3) {
+      geometry.computeVertexNormals()
+    }
     frame.mesh_geometry = geometry
 
     // Get the previously buffered frames to append to
-    const previousBuffered = this.bufferedFrames.slice()
+    const previousBuffered = _.sortBy(this.bufferedFrames, ["uid"])
     previousBuffered.push(frame)
 
     const bufferCount = previousBuffered.length
@@ -506,7 +528,7 @@ AFRAME.registerComponent("scvv", {
     }
 
     // After n frames check apply the matrix offset and compute the z offset
-    if (bufferCount == 1) {
+    if (this.mesh && bufferCount == 5) {
       geometry.computeBoundingSphere()
       const offset = geometry.boundingSphere.radius / -2
       this.mesh.position.set(0, 0, offset)
@@ -514,7 +536,8 @@ AFRAME.registerComponent("scvv", {
     }
 
     // Sort by uid (timestamp) and only keep the most recent ones
-    this.bufferedFrames = _.sortBy(previousBuffered, ["uid"]).slice(start)
+    this.bufferedFrames = previousBuffered.slice(start)
+    // TODO: forEach through all the dropped frames and call .dispose()
 
     if (!this.shouldPlay && this.data.autoplay) {
       if (this.bufferedFrames.length > this.minBuffered) {
@@ -603,7 +626,7 @@ AFRAME.registerComponent("scvv", {
           return Promise.all(downloadPromises)
         })
         .catch(e => {
-          console.log("failed downloading latest audio")
+          // console.log("failed downloading latest audio")
         })
     }
 
@@ -723,6 +746,9 @@ AFRAME.registerComponent("scvv", {
    * @param {*} frame
    */
   displaySCVVFrame(frame) {
+    if (!frame) {
+      frame = this.bufferedFrames[this.frameIdx]
+    }
     if (!!frame && !!frame.mesh_geometry && !!frame.texture_blob) {
       // console.log(`total: ${Date.now() - frame.seen}`)
       this.scvvTextureImage.src = frame.texture_blob
@@ -795,7 +821,8 @@ AFRAME.registerComponent("scvv", {
         const nextIdx = this.frameIdx + 1
         this.framesLeft = lastIdx - this.frameIdx
 
-        this.displaySCVVFrame(this.bufferedFrames[this.frameIdx])
+        // console.log(`frame uid: ${frame.uid}`)
+        this.displaySCVVFrame()
         this.vv_frame_ms += this.deltas
         this.deltas = 0
 
@@ -814,7 +841,8 @@ AFRAME.registerComponent("scvv", {
         } else {
           this.frameIdx = nextIdx
         }
+        // console.log(`over: ${nextIdx} of ${lastIdx}`)
       }
     }
-  }
+  },
 })
